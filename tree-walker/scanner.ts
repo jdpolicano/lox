@@ -1,9 +1,9 @@
-import Token, { Coordinate, TokenType } from "./token.ts";
+import Token, { Coordinate, Literal, TokenType } from "./token.ts";
 
 export default class Scanner {
   private source: string;
   private coordinates: Coordinate;
-  tokens: Token<any>[] = [];
+  tokens: Token[] = [];
 
   constructor(source: string) {
     this.source = source;
@@ -20,72 +20,222 @@ export default class Scanner {
   }
 
   private scanToken() {
-    const coordinates = this.copyCoordinates();
+    const nextChar = this.take();
 
-    if (this.matchCurr("!")) {
-      this.addToken(TokenType.LEFT_PAREN);
-      return;
+    switch (nextChar) {
+      case "(":
+        this.addToken(TokenType.LEFT_PAREN, nextChar);
+        break;
+      case ")":
+        this.addToken(TokenType.RIGHT_PAREN, nextChar);
+        break;
+      case "{":
+        this.addToken(TokenType.LEFT_BRACE, nextChar);
+        break;
+      case "}":
+        this.addToken(TokenType.RIGHT_BRACE, nextChar);
+        break;
+      case ",":
+        this.addToken(TokenType.COMMA, nextChar);
+        break;
+      case ".":
+        if (this.isNumber(this.peek())) {
+          this.numberToken(nextChar);
+        } else {
+          this.addToken(TokenType.DOT, nextChar);
+        }
+        break;
+      case "-":
+        this.addToken(TokenType.MINUS, nextChar);
+        break;
+      case "+":
+        this.addToken(TokenType.PLUS, nextChar);
+        break;
+      case ";":
+        this.addToken(TokenType.SEMICOLON, nextChar);
+        break;
+      case "*":
+        this.addToken(TokenType.STAR, nextChar);
+        break;
+      case "!":
+        if (this.peek() === "=") {
+          this.addToken(TokenType.BANG_EQUAL, "!=");
+          this.take();
+        } else {
+          this.addToken(TokenType.BANG, nextChar);
+        }
+        break;
+      case "=":
+        if (this.peek() === "=") {
+          this.addToken(TokenType.EQUAL_EQUAL, "==");
+          this.take();
+        } else {
+          this.addToken(TokenType.EQUAL, nextChar);
+        }
+        break;
+      case "<":
+        if (this.peek() === "=") {
+          this.addToken(TokenType.LESS_EQUAL, "<=");
+          this.take();
+        } else {
+          this.addToken(TokenType.LESS, nextChar);
+        }
+        break;
+      case ">":
+        if (this.peek() === "=") {
+          this.addToken(TokenType.GREATER_EQUAL, ">=");
+          this.take();
+        } else {
+          this.addToken(TokenType.GREATER, nextChar);
+        }
+        break;
+      case "/":
+        if (this.peek() === "/") {
+          while (this.peek() !== "\n" && !this.isEof()) {
+            this.take();
+          }
+        } else {
+          this.addToken(TokenType.SLASH, nextChar);
+        }
+        break;
+      case " ":
+      case "\t":
+      case "\r":
+        break;
+      case "\n":
+        this.incrementLine();
+        break;
+      case '"':
+        this.stringToken();
+        break;
+      default:
+        if (this.isNumber(nextChar)) {
+          this.numberToken(nextChar);
+        } else if (this.isAlpha(nextChar)) {
+          this.identifierToken(nextChar);
+        } else {
+          this.throwLoxLexicalError(
+            `Unexpected character ${nextChar} at ${this.fromatRowCol()}`,
+          );
+        }
+        break;
+    }
+  }
+
+  private numberToken(start: string) {
+    let value = start;
+    const numberStartLocation = this.copyCoordinates();
+
+    while (this.isNumber(this.peek()) || this.peek() === ".") {
+      value += this.take();
     }
 
-    if (currChar === ")") {
-      this.addToken(TokenType.RIGHT_PAREN);
-      return;
+    this.addToken(
+      TokenType.NUMBER,
+      value,
+      parseFloat(value),
+      numberStartLocation,
+    );
+  }
+
+  private stringToken() {
+    const stringStartLoc = this.copyCoordinates();
+    let value = "";
+
+    while (this.peek() !== '"' && !this.isEof()) {
+      if (this.peek() === "\n") {
+        this.incrementLine();
+      }
+      value += this.take();
     }
 
-    if (currChar === "{") {
-      this.addToken(TokenType.LEFT_BRACE);
-      return;
+    if (this.isEof()) {
+      this.throwLoxLexicalError(
+        `Unterminated string at ${this.fromatRowCol()}`,
+      );
     }
 
-    if (currChar === "}") {
-      this.addToken(TokenType.RIGHT_BRACE);
-      return;
+    this.take();
+    this.addToken(
+      TokenType.STRING,
+      `"${value}"`,
+      value,
+      stringStartLoc,
+    );
+  }
+
+  private identifierToken(start: string) {
+    const reservedWords: Record<string, TokenType> = {
+      and: TokenType.AND,
+      class: TokenType.CLASS,
+      else: TokenType.ELSE,
+      for: TokenType.FOR,
+      fun: TokenType.FUN,
+      if: TokenType.IF,
+      nil: TokenType.NIL,
+      or: TokenType.OR,
+      print: TokenType.PRINT,
+      return: TokenType.RETURN,
+      super: TokenType.SUPER,
+      this: TokenType.THIS,
+      var: TokenType.VAR,
+      while: TokenType.WHILE,
+    };
+
+    const booleans: Record<string, TokenType> = {
+      true: TokenType.TRUE,
+      false: TokenType.FALSE,
+    };
+
+    const identifierStartLocation = this.copyCoordinates();
+    let identifier = start;
+
+    while (this.isAlpha(this.peek()) || this.isNumber(this.peek())) {
+      identifier += this.take();
     }
 
-    if (currChar === ",") {
-      this.addToken(TokenType.COMMA);
-      return;
+    if (reservedWords[identifier]) {
+      this.addToken(
+        reservedWords[identifier],
+        identifier,
+        null,
+        identifierStartLocation,
+      );
+    } else if (booleans[identifier]) {
+      this.addToken(
+        booleans[identifier],
+        identifier,
+        booleans[identifier] === TokenType.TRUE ? true : false,
+        identifierStartLocation,
+      );
+    } else {
+      this.addToken(
+        TokenType.IDENTIFIER,
+        identifier,
+        null,
+        identifierStartLocation,
+      );
     }
+  }
 
-    if (currChar === ".") {
-      this.addToken(TokenType.DOT);
-      return;
-    }
+  private isNumber(char: string) {
+    return (char >= "0" && char <= "9");
+  }
 
-    if (currChar === "-") {
-      this.addToken(TokenType.MINUS);
-      return;
-    }
-
-    if (currChar === "+") {
-      this.addToken(TokenType.PLUS);
-      return;
-    }
-
-    if (currChar === ";") {
-      this.addToken(TokenType.SEMICOLON);
-      return;
-    }
-
-    if (currChar === "*") {
-      this.addToken(TokenType.STAR);
-      return;
-    }
-
-    if (currChar) {
-      this.safeAdvance();
-    }
+  private isAlpha(char: string) {
+    return /[a-zA-Z_]+/.test(char);
   }
 
   private addToken(
     type: TokenType,
-    literal: any = null,
+    lexeme: string,
+    literal: Literal = null,
     coordinate: Coordinate = this.copyCoordinates(),
   ) {
     this.tokens.push(
       new Token({
         type,
-        lexeme: this.source[0],
+        lexeme,
         literal,
         coordinate,
       }),
@@ -96,56 +246,34 @@ export default class Scanner {
     return structuredClone(this.coordinates);
   }
 
-  private matchCurr(matcher: string) {
-    if (this.currIs(matcher)) {
-      this.advance();
-      return true;
-    }
-    return false;
-  }
-
-  private currIs(matcher: string) {
-    if (this.isEof()) return false;
-    return this.source[0] === matcher;
-  }
-
   private peek() {
-    return this.source[0] || "";
+    if (this.isEof()) return "";
+    return this.source[0];
+  }
+
+  private take() {
+    const nextChar = this.peek();
+    this.advance();
+    this.incrementOffset();
+    return nextChar;
   }
 
   private advance() {
     if (this.isEof()) return;
-
-    if (this.source[0] === "\n") {
-      this.coordinates.line++;
-      this.coordinates.offset = 0;
-    } else {
-      this.coordinates.offset++;
-    }
-
     this.source = this.source.slice(1);
+  }
+
+  private incrementOffset() {
+    this.coordinates.offset++;
+  }
+
+  private incrementLine() {
+    this.coordinates.line++;
+    this.coordinates.offset = 0;
   }
 
   isEof() {
     return this.source.length === 0;
-  }
-
-  private safeAdvance() {
-    const garbage = this.peek();
-
-    if (this.isOkGarbage(garbage)) {
-      this.advance();
-      return;
-    }
-
-    this.throwLoxLexicalError(
-      `Unexpected character '${garbage}' at ${this.fromatRowCol()}`,
-    );
-  }
-
-  private isOkGarbage(garbage: string) {
-    return garbage === " " || garbage === "\t" || garbage === "\r" ||
-      garbage === "\n";
   }
 
   private throwLoxLexicalError(message: string) {

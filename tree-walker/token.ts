@@ -1,7 +1,8 @@
+export type Literal = string | number | null | boolean;
+
 export interface Coordinate {
   line: number;
   offset: number;
-  buffIndex: number;
 }
 
 export enum TokenType {
@@ -54,20 +55,20 @@ export enum TokenType {
   EOF,
 }
 
-export interface TokenOptions<T> {
+export interface TokenOptions {
   type: TokenType;
   lexeme: string;
-  literal: T;
+  literal: Literal;
   coordinate: Coordinate;
 }
 
-export default class Token<T> {
+export default class Token {
   private readonly type: TokenType;
   private readonly lexeme: string;
-  private readonly literal: T;
+  private readonly literal: Literal;
   private readonly coordinate: Coordinate;
 
-  constructor(opts: TokenOptions<T>) {
+  constructor(opts: TokenOptions) {
     this.type = opts.type;
     this.lexeme = opts.lexeme;
     this.literal = opts.literal;
@@ -75,6 +76,8 @@ export default class Token<T> {
   }
 
   public toString(): string {
-    return `${this.type} ${this.lexeme} ${this.literal}`;
+    return `(${this.coordinate.line}:${this.coordinate.offset}) ${
+      TokenType[this.type]
+    } "${this.lexeme}" ${this.literal}`;
   }
 }
