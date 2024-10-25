@@ -1,0 +1,10 @@
+// begin autogen for "Literal"
+export class Literal extends Expression {
+  value: Token;
+
+  constructor(value: Token) {
+    super();
+    this.value = value;
+  }
+}
+// end autogen for "Literal"
