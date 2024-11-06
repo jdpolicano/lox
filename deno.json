@@ -2,9 +2,12 @@
   "imports": {
     "@std/assert": "jsr:@std/assert@^1.0.6",
     "@std/cli": "jsr:@std/cli@^1.0.6",
+    "@std/path": "jsr:@std/path@^1.0.8",
+    "eta": "npm:eta@^3.5.0",
     "zod": "npm:zod@^3.23.8"
   },
   "tasks": {
-    "build:ast": "Deno -RW ./tools/cli.ts --output ./trash.ts"
+    "build:ast": "Deno -RW ./tooling/template/templater.ts --src ./tree-walker/ast/nodes.eta",
+    "tree-walker": "Deno run ./tree-walker/main.ts"
   }
 }

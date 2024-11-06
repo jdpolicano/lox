@@ -1,0 +1,48 @@
+{
+  "classes": [
+    {
+      "name": "Literal",
+      "extends": "Expr",
+      "properties": { "value": "Token" }
+    },
+    {
+      "name": "Grouping",
+      "extends": "Expr",
+      "properties": { "expression": "Expr" }
+    },
+    {
+      "name": "Urnary",
+      "extends": "Expr",
+      "properties": { "operator": "Token", "right": "Expr" }
+    },
+    {
+      "name": "Binary",
+      "extends": "Expr",
+      "properties": {
+        "left": "Expr",
+        "operator": "Token",
+        "right": "Expr"
+      }
+    },
+    {
+      "name": "Variable",
+      "extends": "Expr",
+      "properties": { "name": "Token" }
+    },
+    {
+      "name": "Expression",
+      "extends": "Stmt",
+      "properties": { "expression": "Expr" }
+    },
+    {
+      "name": "Print",
+      "extends": "Stmt",
+      "properties": { "expression": "Expr" }
+    },
+    {
+      "name": "Var",
+      "extends": "Stmt",
+      "properties": { "name": "Token", "initializer?": "Expr" }
+    }
+  ]
+}

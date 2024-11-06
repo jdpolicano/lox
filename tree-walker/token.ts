@@ -63,10 +63,10 @@ export interface TokenOptions {
 }
 
 export default class Token {
-  private readonly type: TokenType;
-  private readonly lexeme: string;
-  private readonly literal: Literal;
-  private readonly coordinate: Coordinate;
+  readonly type: TokenType;
+  readonly lexeme: string;
+  readonly literal: Literal;
+  readonly coordinate: Coordinate;
 
   constructor(opts: TokenOptions) {
     this.type = opts.type;
@@ -75,9 +75,30 @@ export default class Token {
     this.coordinate = opts.coordinate;
   }
 
-  public toString(): string {
+  public toFormattedString(): string {
     return `(${this.coordinate.line}:${this.coordinate.offset}) ${
       TokenType[this.type]
     } "${this.lexeme}" ${this.literal}`;
+  }
+
+  public toCoordinateString(): string {
+    return `(${this.coordinate.line}:${this.coordinate.offset})`;
+  }
+
+  public toLogicalString() {
+    switch (this.type) {
+      case TokenType.STRING:
+        return `"${this.lexeme}"`;
+      case TokenType.NUMBER:
+        return `${this.literal}`;
+      case TokenType.TRUE:
+        return "true";
+      case TokenType.FALSE:
+        return "false";
+      case TokenType.NIL:
+        return "nil";
+      default:
+        return `"${this.lexeme}"`;
+    }
   }
 }

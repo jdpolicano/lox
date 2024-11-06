@@ -13,10 +13,11 @@ export default class Scanner {
     };
   }
 
-  scanTokens() {
+  scanTokens(): Token[] {
     while (!this.isEof()) {
       this.scanToken();
     }
+    return this.tokens;
   }
 
   private scanToken() {
