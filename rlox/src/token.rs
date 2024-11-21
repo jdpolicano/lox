@@ -47,6 +47,7 @@ pub enum TokenType {
     True,
     Var,
     While,
+    Break,
 
     // End of file
     Eof,
@@ -93,6 +94,22 @@ pub struct Coordinate {
     pub index: usize,  // index into the flat buffer
     pub line: usize,   // logical line number
     pub column: usize, // logical column number
+}
+
+impl Coordinate {
+    pub fn new(index: usize, line: usize, column: usize) -> Coordinate {
+        Coordinate {
+            index,
+            line,
+            column,
+        }
+    }
+}
+
+impl Default for Coordinate {
+    fn default() -> Self {
+        Coordinate::new(0, 0, 0)
+    }
 }
 
 impl fmt::Display for Coordinate {

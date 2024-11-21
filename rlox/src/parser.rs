@@ -1,5 +1,5 @@
 use crate::ast::{Expr, Stmt};
-use crate::token::{Token, TokenType};
+use crate::token::{Coordinate, Literal, Token, TokenType};
 use std::fmt::{self, Display};
 
 const EQUALITIES: [TokenType; 2] = [TokenType::BangEqual, TokenType::EqualEqual];
@@ -22,8 +22,8 @@ const LITERALS: [TokenType; 5] = [
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParseError {
-    TokenAssertionFailure(TokenType, Token),
-    UnexpectedToken(Token),
+    TokenAssertionFailure(&'static str, TokenType, Token),
+    UnexpectedToken(&'static str, Token),
     UnexpectedEndOfFile(Option<Token>),
     InvalidAssignmentTarget(Token),
     LikelyLogicalError, // This is a catch-all for errors that are likely to be logical errors in the parser
@@ -33,15 +33,17 @@ impl Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "ParseError: ")?;
         match self {
-            ParseError::TokenAssertionFailure(expected, token) => {
+            ParseError::TokenAssertionFailure(msg, expected, token) => {
                 write!(
                     f,
                     "Expected token of type \"{:?}\" but got token \"{:?}\" {}",
                     expected, token.token_type, token.coordinate
-                )
+                )?;
+                write!(f, "\n{}", msg)
             }
-            ParseError::UnexpectedToken(token) => {
-                write!(f, "Unexpected token {} {}", token.lexeme, token.coordinate)
+            ParseError::UnexpectedToken(msg, token) => {
+                write!(f, "Unexpected token {} {}", token.lexeme, token.coordinate)?;
+                write!(f, "\n{}", msg)
             }
             ParseError::UnexpectedEndOfFile(token) => {
                 write!(f, "Unexpected end of file")?;
@@ -105,12 +107,14 @@ impl TokenStream {
 
 pub struct Parser {
     stream: TokenStream,
+    is_in_loop: bool,
 }
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
         Self {
             stream: TokenStream::new(tokens),
+            is_in_loop: false,
         }
     }
 
@@ -143,13 +147,15 @@ impl Parser {
     }
 
     pub fn var_declaration(&mut self) -> Result<Stmt, ParseError> {
-        let name = self.expect(TokenType::Identifier)?.clone();
+        let name = self
+            .expect("var statment missing identifier", TokenType::Identifier)?
+            .clone();
         let initializer = if self.match_exact(TokenType::Equal).is_some() {
             Some(self.expression()?)
         } else {
             None
         };
-        self.expect(TokenType::Semicolon)?;
+        self.expect("unterminated var statement", TokenType::Semicolon)?;
         Ok(Stmt::Var { name, initializer })
     }
 
@@ -160,25 +166,90 @@ impl Parser {
             self.block()
         } else if self.match_exact(TokenType::If).is_some() {
             self.if_statement()
-        } else if self.match_exact(TokenType::While).is_some() {
-            self.while_statement()
+        } else if self.next_is(TokenType::While) || self.next_is(TokenType::For) {
+            self.loop_statment()
+        } else if self.next_is(TokenType::Break) {
+            self.break_statement()
         } else {
             self.expression_statement()
         }
     }
 
+    fn break_statement(&mut self) -> Result<Stmt, ParseError> {
+        let keyword = self.take_token()?.clone();
+        if !self.is_in_loop {
+            return Err(ParseError::UnexpectedToken(
+                "\"break\" can only occur inside a loop",
+                keyword,
+            ));
+        }
+        self.expect("unterminated \"break\"", TokenType::Semicolon)?;
+        Ok(Stmt::Break { keyword })
+    }
+
+    fn loop_statment(&mut self) -> Result<Stmt, ParseError> {
+        self.toggle_loop();
+        let res = match self.take_token()? {
+            t if t.token_type == TokenType::For => self.for_statement(),
+            t if t.token_type == TokenType::While => self.while_statement(),
+            _ => {
+                unreachable!(
+                    "loop_statement() should only have been called after a forward scan..."
+                )
+            }
+        };
+        self.toggle_loop();
+        res
+    }
+
+    fn for_statement(&mut self) -> Result<Stmt, ParseError> {
+        self.expect("for loop requires \"(...\'", TokenType::LeftParen)?;
+
+        let intializer = if self.match_exact(TokenType::Semicolon).is_some() {
+            None
+        } else if self.match_exact(TokenType::Var).is_some() {
+            Some(self.var_declaration()?)
+        } else {
+            Some(self.expression_statement()?)
+        };
+
+        let condition = if self.match_exact(TokenType::Semicolon).is_some() {
+            None
+        } else {
+            let cond = Some(self.expression()?);
+            self.expect(
+                "for loop condition missing termating \";\"",
+                TokenType::Semicolon,
+            )?;
+            cond
+        };
+
+        let increment = if self.match_exact(TokenType::RightParen).is_some() {
+            None
+        } else {
+            let inc = Some(Stmt::Expression {
+                expression: self.expression()?,
+            });
+            self.expect("for loop unclosed parens", TokenType::RightParen)?;
+            inc
+        };
+
+        let body = self.statement()?;
+        Ok(desugar_for_loop(intializer, condition, increment, body))
+    }
+
     fn while_statement(&mut self) -> Result<Stmt, ParseError> {
-        self.expect(TokenType::LeftParen)?;
+        self.expect("while statement requires \"(...\"", TokenType::LeftParen)?;
         let condition = self.expression()?;
-        self.expect(TokenType::RightParen)?;
+        self.expect("while statement unclosed parens", TokenType::RightParen)?;
         let body = Box::new(self.statement()?);
         Ok(Stmt::While { condition, body })
     }
 
     fn if_statement(&mut self) -> Result<Stmt, ParseError> {
-        self.expect(TokenType::LeftParen)?;
+        self.expect("if statement requires \"(...\"", TokenType::LeftParen)?;
         let condition = self.expression()?;
-        self.expect(TokenType::RightParen)?;
+        self.expect("if statement unclosed parens", TokenType::RightParen)?;
 
         let then_branch = Box::new(self.statement()?);
         let else_branch = if self.match_exact(TokenType::Else).is_some() {
@@ -199,19 +270,19 @@ impl Parser {
         while !(self.next_is(TokenType::RightBrace) || self.is_done()) {
             statements.push(self.declaration()?);
         }
-        self.expect(TokenType::RightBrace)?;
+        self.expect("unterminated block scope", TokenType::RightBrace)?;
         Ok(Stmt::Block { statements })
     }
 
     fn print_statement(&mut self) -> Result<Stmt, ParseError> {
         let expression = self.expression()?;
-        self.expect(TokenType::Semicolon)?;
+        self.expect("unterminated \"print\" statement", TokenType::Semicolon)?;
         Ok(Stmt::Print { expression })
     }
 
     fn expression_statement(&mut self) -> Result<Stmt, ParseError> {
         let expression = self.expression()?;
-        self.expect(TokenType::Semicolon)?;
+        self.expect("unterminated statement", TokenType::Semicolon)?;
         Ok(Stmt::Expression { expression })
     }
 
@@ -359,13 +430,13 @@ impl Parser {
 
         if tok.token_type == TokenType::LeftParen {
             let expr = self.expression()?;
-            self.expect(TokenType::RightParen)?;
+            self.expect("unterminated left parens", TokenType::RightParen)?;
             return Ok(Expr::Grouping {
                 expression: Box::new(expr),
             });
         }
 
-        Err(ParseError::UnexpectedToken(tok))
+        Err(ParseError::UnexpectedToken("unexpected primary", tok))
     }
 
     fn syncronize(&mut self) {
@@ -387,12 +458,16 @@ impl Parser {
         }
     }
 
-    fn expect(&mut self, t: TokenType) -> Result<&Token, ParseError> {
+    fn toggle_loop(&mut self) {
+        self.is_in_loop = !self.is_in_loop;
+    }
+
+    fn expect(&mut self, msg: &'static str, t: TokenType) -> Result<&Token, ParseError> {
         self.take_token().and_then(|tok| {
             if tok.token_type == t {
                 Ok(tok)
             } else {
-                Err(ParseError::TokenAssertionFailure(t, tok.clone()))
+                Err(ParseError::TokenAssertionFailure(msg, t, tok.clone()))
             }
         })
     }
@@ -420,6 +495,64 @@ impl Parser {
             true
         }
     }
+}
+
+// This is so the parser can inject tokens into the tree
+// that aren't actually reflected in the source token stream.
+fn artificial_token(t: TokenType, v: Literal) -> Token {
+    Token::new(
+        t,
+        String::new(), // doesn't allocate
+        v,
+        Coordinate::default(),
+    )
+}
+
+fn literal_true() -> Expr {
+    Expr::Literal {
+        value: artificial_token(TokenType::True, Literal::Boolean(true)),
+    }
+}
+
+fn while_loop_with_increment(condition: Expr, body: Stmt, increment: Option<Stmt>) -> Stmt {
+    match body {
+        Stmt::Block { mut statements } => {
+            increment.map(|i| statements.push(i));
+            Stmt::While {
+                condition,
+                body: Box::new(Stmt::Block { statements }),
+            }
+        }
+
+        other => {
+            let mut statements = vec![other];
+            increment.map(|i| statements.push(i));
+            Stmt::While {
+                condition,
+                body: Box::new(Stmt::Block { statements }),
+            }
+        }
+    }
+}
+
+fn desugar_for_loop(
+    init: Option<Stmt>,
+    condition: Option<Expr>,
+    increment: Option<Stmt>,
+    body: Stmt,
+) -> Stmt {
+    let mut statements = match init {
+        Some(s) => vec![s],
+        _ => vec![],
+    };
+
+    statements.push(while_loop_with_increment(
+        condition.unwrap_or(literal_true()),
+        body,
+        increment,
+    ));
+
+    Stmt::Block { statements }
 }
 
 #[cfg(test)]

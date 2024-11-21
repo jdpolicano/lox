@@ -106,7 +106,7 @@ impl StmtVisitor<InterpreterResult> for Interpreter {
     fn visit_print(&mut self, expression: Expr) -> InterpreterResult {
         let value = expression.accept(self)?;
         println!("{}", value);
-        Ok(value)
+        Ok(Literal::Nil)
     }
 
     fn visit_var(&mut self, name: Token, initializer: Option<Expr>) -> InterpreterResult {
@@ -127,11 +127,16 @@ impl StmtVisitor<InterpreterResult> for Interpreter {
 
         for stmt in statements {
             match stmt.accept(self) {
-                Ok(_) => {}
+                // handle a potential break statement.
+                Ok(v) if is_truthy(&v) => {
+                    self.environment = origin; // Restore original environment
+                    return Ok(v);
+                }
                 Err(e) => {
                     self.environment = origin; // Restore original environment
                     return Err(e);
                 }
+                _ => {}
             }
         }
 
@@ -157,9 +162,15 @@ impl StmtVisitor<InterpreterResult> for Interpreter {
 
     fn visit_while(&mut self, condition: Expr, body: Box<Stmt>) -> InterpreterResult {
         while is_truthy(&condition.accept(self)?) {
-            body.accept(self)?;
+            if is_truthy(&body.accept(self)?) {
+                break;
+            }
         }
         Ok(Literal::Nil)
+    }
+
+    fn visit_break(&mut self, _: Token) -> InterpreterResult {
+        Ok(Literal::Boolean(true))
     }
 }
 

@@ -98,5 +98,11 @@ define_ast! {
             condition: Expr,
             body: Box<Stmt>,
         },
+
+        // the only difference here is that break returns a value (true);
+        // every other statement should return null (for now...)
+        Break visit_break {
+            keyword: Token,
+        },
     }
 }

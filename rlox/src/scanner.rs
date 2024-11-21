@@ -249,6 +249,7 @@ impl<'a> Scanner<'a> {
             "true" => TokenType::True,
             "var" => TokenType::Var,
             "while" => TokenType::While,
+            "break" => TokenType::Break,
             _ => TokenType::Identifier,
         };
 

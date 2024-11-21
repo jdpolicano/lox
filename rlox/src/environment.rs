@@ -31,7 +31,7 @@ impl Environment {
             return Some(v.clone());
         }
 
-        if let Some(p) = self.parent.as_ref() {
+        if let Some(ref p) = self.parent {
             p.borrow_mut().get(k)
         } else {
             None
@@ -40,7 +40,7 @@ impl Environment {
 
     pub fn assign(&mut self, k: String, v: Literal) -> Result<(), ()> {
         if self.values.contains_key(&k) {
-            self.values.insert(k, v);
+            self.values.get_mut(&k).map(|x| *x = v);
             Ok(())
         } else if let Some(ref p) = self.parent {
             p.borrow_mut().assign(k, v)

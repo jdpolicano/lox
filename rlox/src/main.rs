@@ -4,11 +4,14 @@ use lox::parser::{ParseError, Parser};
 use lox::scanner::Scanner;
 
 fn main() {
-    let input = r#"var a = 0;
-    while (a < 1000) {
-        print a;
-        a = a + .01;
+    let input = r#"
+    for (var i = 0; i <= 5; i = i + 1) {
+        print i;
+        if (i == 3) break;
     }
+
+    print 123;
+
     "#;
     let tokens = Scanner::new(input).scan_tokens();
 
