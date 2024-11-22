@@ -24,11 +24,7 @@ impl Iterator for CharWithCoordinate<'_> {
 
     fn next(&mut self) -> Option<(char, Coordinate)> {
         let (index, ch) = self.chars.next()?;
-        let coordinate = Coordinate {
-            index,
-            line: self.line,
-            column: self.column,
-        };
+        let coordinate = Coordinate::new(index, self.line, self.column);
 
         if ch == '\n' {
             self.line += 1;
@@ -75,7 +71,7 @@ impl<'a> Scanner<'a> {
             if t.token_type != TokenType::Eof {
                 tokens.push(Token::new(
                     TokenType::Eof,
-                    String::new(),
+                    None,
                     Literal::Nil,
                     t.coordinate.clone(),
                 ));
@@ -101,10 +97,32 @@ impl<'a> Scanner<'a> {
 
                 Ok(self.simple_token(TokenType::Dot, (ch, coordinate)))
             }
-            '-' => Ok(self.simple_token(TokenType::Minus, (ch, coordinate))),
-            '+' => Ok(self.simple_token(TokenType::Plus, (ch, coordinate))),
+            //'-' => Ok(self.simple_token(TokenType::Minus, (ch, coordinate))),
+            '-' => {
+                let toke = if self.match_char('=') {
+                    self.multi_char_token(TokenType::MinusEqual, "-=".to_string(), coordinate)
+                } else {
+                    self.simple_token(TokenType::Plus, (ch, coordinate))
+                };
+                Ok(toke)
+            }
+            '+' => {
+                let toke = if self.match_char('=') {
+                    self.multi_char_token(TokenType::PlusEqual, "+=".to_string(), coordinate)
+                } else {
+                    self.simple_token(TokenType::Plus, (ch, coordinate))
+                };
+                Ok(toke)
+            }
             ';' => Ok(self.simple_token(TokenType::Semicolon, (ch, coordinate))),
-            '*' => Ok(self.simple_token(TokenType::Star, (ch, coordinate))),
+            '*' => {
+                let toke = if self.match_char('=') {
+                    self.multi_char_token(TokenType::StarEqual, "*=".to_string(), coordinate)
+                } else {
+                    self.simple_token(TokenType::Plus, (ch, coordinate))
+                };
+                Ok(toke)
+            }
             '!' => {
                 let toke = if self.match_char('=') {
                     self.multi_char_token(TokenType::BangEqual, "!=".to_string(), coordinate)
@@ -144,6 +162,8 @@ impl<'a> Scanner<'a> {
                         return Ok(None);
                     }
                     Ok(self.scan_token()?)
+                } else if self.match_char('=') {
+                    Ok(self.multi_char_token(TokenType::SlashEqual, "/=".to_string(), coordinate))
                 } else {
                     Ok(self.simple_token(TokenType::Slash, (ch, coordinate)))
                 }
@@ -179,7 +199,7 @@ impl<'a> Scanner<'a> {
                 let literal = Literal::String(String::from(&lexeme[1..lexeme.len() - 1]));
                 return Ok(Some(Token::new(
                     TokenType::String,
-                    lexeme,
+                    Some(lexeme),
                     literal,
                     start_corrdinate,
                 )));
@@ -214,7 +234,7 @@ impl<'a> Scanner<'a> {
 
         Ok(Some(Token::new(
             TokenType::Number,
-            lexeme,
+            Some(lexeme),
             literal,
             start_coordinate,
         )))
@@ -261,7 +281,7 @@ impl<'a> Scanner<'a> {
 
         Ok(Some(Token::new(
             token_type,
-            lexeme,
+            Some(lexeme),
             literal,
             start_coordinate,
         )))
@@ -286,11 +306,16 @@ impl<'a> Scanner<'a> {
         s: String,
         coordinate: Coordinate,
     ) -> Option<Token> {
-        Some(Token::new(token_type, s, Literal::Nil, coordinate))
+        Some(Token::new(token_type, Some(s), Literal::Nil, coordinate))
     }
 
     fn simple_token(&mut self, token_type: TokenType, ch: (char, Coordinate)) -> Option<Token> {
-        Some(Token::new(token_type, ch.0.to_string(), Literal::Nil, ch.1))
+        Some(Token::new(
+            token_type,
+            Some(ch.0.to_string()),
+            Literal::Nil,
+            ch.1,
+        ))
     }
 
     fn is_at_end(&mut self) -> bool {
@@ -349,13 +374,9 @@ mod test {
     ) -> Token {
         Token::new(
             token_type,
-            lexeme.to_string(),
+            Some(lexeme.to_string()),
             literal,
-            Coordinate {
-                index,
-                line,
-                column,
-            },
+            Coordinate::new(index, line, column),
         )
     }
 
@@ -433,11 +454,7 @@ mod test {
                 assert!(result.is_err());
                 assert_eq!(
                     result.unwrap_err(),
-                    LexicalError::InvalidNumber(Coordinate {
-                        index,
-                        line,
-                        column
-                    })
+                    LexicalError::InvalidNumber(Coordinate::new(index, line, column))
                 );
             } else {
                 let tokens = result.unwrap();
@@ -526,14 +543,7 @@ mod test {
         let result = scanner.scan_tokens();
         assert!(result.is_err());
 
-        let expected_error = LexicalError::InvalidCharacter(
-            '@',
-            Coordinate {
-                index: 0,
-                line: 1,
-                column: 1,
-            },
-        );
+        let expected_error = LexicalError::InvalidCharacter('@', Coordinate::default());
         assert_eq!(result.unwrap_err(), expected_error);
     }
 
@@ -544,11 +554,7 @@ mod test {
         let result = scanner.scan_tokens();
         assert!(result.is_err());
 
-        let expected_error = LexicalError::UnterminatedString(Coordinate {
-            index: 0,
-            line: 1,
-            column: 1,
-        });
+        let expected_error = LexicalError::UnterminatedString(Coordinate::default());
         assert_eq!(result.unwrap_err(), expected_error);
     }
 

@@ -9,13 +9,17 @@ pub enum TokenType {
     RightBrace,
     Comma,
     Dot,
-    Minus,
-    Plus,
-    Semicolon,
-    Slash,
-    Star,
 
     // One or two character tokens.
+    Minus,
+    MinusEqual,
+    Plus,
+    PlusEqual,
+    Semicolon,
+    Slash,
+    SlashEqual,
+    Star,
+    StarEqual,
     Bang,
     BangEqual,
     Equal,
@@ -94,6 +98,7 @@ pub struct Coordinate {
     pub index: usize,  // index into the flat buffer
     pub line: usize,   // logical line number
     pub column: usize, // logical column number
+    is_synthetic: bool,
 }
 
 impl Coordinate {
@@ -102,13 +107,27 @@ impl Coordinate {
             index,
             line,
             column,
+            is_synthetic: false,
         }
+    }
+
+    pub fn synthetic() -> Self {
+        Coordinate {
+            index: 0,
+            line: 0,
+            column: 0,
+            is_synthetic: true,
+        }
+    }
+
+    pub fn is_synthetic(&self) -> bool {
+        self.is_synthetic
     }
 }
 
 impl Default for Coordinate {
     fn default() -> Self {
-        Coordinate::new(0, 0, 0)
+        Coordinate::new(0, 1, 1)
     }
 }
 
@@ -121,7 +140,7 @@ impl fmt::Display for Coordinate {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Token {
     pub token_type: TokenType,
-    pub lexeme: String,
+    pub lexeme: Option<String>,
     pub literal: Literal,
     pub coordinate: Coordinate,
 }
@@ -135,7 +154,7 @@ impl fmt::Display for Token {
 impl Token {
     pub fn new(
         token_type: TokenType,
-        lexeme: String,
+        lexeme: Option<String>,
         literal: Literal,
         coordinate: Coordinate,
     ) -> Token {
@@ -144,6 +163,21 @@ impl Token {
             lexeme,
             literal,
             coordinate,
+        }
+    }
+
+    pub fn synthetic(t: TokenType, literal: Literal) -> Self {
+        Token::new(t, None, literal, Coordinate::synthetic())
+    }
+
+    pub fn with_lexeme<T, R>(&self, f: T) -> R
+    where
+        T: FnOnce(&str) -> R,
+    {
+        if let Some(ref lex) = self.lexeme {
+            f(lex)
+        } else {
+            f("")
         }
     }
 }

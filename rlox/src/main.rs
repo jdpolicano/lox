@@ -5,13 +5,11 @@ use rlox::scanner::Scanner;
 
 fn main() {
     let input = r#"
-    for (var i = 0; i <= 5; i = i + 1) {
+        // prints from 0 -> 9
+        for (var i = 0; i < 1000000; i += 1) {
+
+        }
         print i;
-        if (i == 3) break;
-    }
-
-    print 123;
-
     "#;
     let tokens = Scanner::new(input).scan_tokens();
 

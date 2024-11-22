@@ -25,6 +25,14 @@ impl Interpreter {
         }
         Ok(())
     }
+
+    pub fn create_new_environment(
+        &mut self,
+    ) -> (Rc<RefCell<Environment>>, Rc<RefCell<Environment>>) {
+        let origin = self.environment.clone(); // Capture the original environment
+        let new_env = Rc::new(RefCell::new(Environment::new(Some(origin.clone())))); // Parent is set to original environment
+        (origin, new_env)
+    }
 }
 
 impl ExprVisitor<InterpreterResult> for Interpreter {
@@ -53,17 +61,17 @@ impl ExprVisitor<InterpreterResult> for Interpreter {
     }
 
     fn visit_variable(&mut self, name: Token) -> InterpreterResult {
-        match self.environment.borrow_mut().get(&name.lexeme) {
+        name.with_lexeme(|word| match self.environment.borrow_mut().get(word) {
             Some(value) => Ok(value.clone()),
-            None => Err(RuntimeError::UndefinedVariable(name)),
-        }
+            None => Err(RuntimeError::UndefinedVariable(name.clone())),
+        })
     }
 
     fn visit_assign(&mut self, name: Token, value: Box<Expr>) -> InterpreterResult {
         let v = value.accept(self)?;
         self.environment
             .borrow_mut()
-            .assign(name.lexeme.clone(), v.clone())
+            .assign(name.lexeme.clone().unwrap(), v.clone())
             .map_err(|_| RuntimeError::UndefinedVariable(name))?;
         Ok(v)
     }
@@ -75,23 +83,12 @@ impl ExprVisitor<InterpreterResult> for Interpreter {
         right: Box<Expr>,
     ) -> InterpreterResult {
         let left = left.accept(self)?;
-
+        let left_is_truthy = is_truthy(&left);
         match operator.token_type {
-            TokenType::Or => {
-                if is_truthy(&left) {
-                    Ok(left)
-                } else {
-                    Ok(right.accept(self)?)
-                }
-            }
-
-            TokenType::And => {
-                if is_truthy(&left) {
-                    Ok(right.accept(self)?)
-                } else {
-                    Ok(left)
-                }
-            }
+            TokenType::Or if left_is_truthy => Ok(left),
+            TokenType::Or => right.accept(self),
+            TokenType::And if left_is_truthy => right.accept(self),
+            TokenType::And => Ok(left),
             _ => Err(RuntimeError::InvalidLogicalOp(operator)),
         }
     }
@@ -110,20 +107,21 @@ impl StmtVisitor<InterpreterResult> for Interpreter {
     }
 
     fn visit_var(&mut self, name: Token, initializer: Option<Expr>) -> InterpreterResult {
-        let value = if let Some(expr) = initializer {
-            expr.accept(self)?
-        } else {
-            Literal::Nil
-        };
+        let value = initializer
+            .map(|e| e.accept(self))
+            .unwrap_or(Ok(Literal::Nil))?;
 
-        self.environment.borrow_mut().define(name.lexeme, value);
+        //TODO - should check that the variable isn't declared already.
+        self.environment
+            .borrow_mut()
+            .define(name.with_lexeme(|lex| lex.to_string()), value);
+
         Ok(Literal::Nil)
     }
 
     fn visit_block(&mut self, statements: Vec<Stmt>) -> InterpreterResult {
-        let origin = self.environment.clone(); // Capture the original environment
-        let new_env = Environment::new(Some(origin.clone())); // Parent is set to original environment
-        self.environment = Rc::new(RefCell::new(new_env));
+        let (origin, new) = self.create_new_environment();
+        self.environment = new;
 
         for stmt in statements {
             match stmt.accept(self) {
@@ -288,21 +286,29 @@ impl fmt::Display for RuntimeError {
                 write!(
                     f,
                     "Invalid math operation \"{} {} {}\" {}",
-                    left, op.lexeme, right, op.coordinate
+                    left,
+                    op.with_lexeme(|lex| lex.to_string()),
+                    right,
+                    op.coordinate
                 )
             }
             RuntimeError::InvalidComparisonOp(left, op, right) => {
                 write!(
                     f,
                     "Invalid comparison operation \"{} {} {}\" {}",
-                    left, op.lexeme, right, op.coordinate
+                    left,
+                    op.with_lexeme(|lex| lex.to_string()),
+                    right,
+                    op.coordinate
                 )
             }
             RuntimeError::InvalidUnaryOp(op, right) => {
                 write!(
                     f,
                     "Invalid unary operation \"{} {}\" {}",
-                    op.lexeme, right, op.coordinate
+                    op.with_lexeme(|lex| lex.to_string()),
+                    right,
+                    op.coordinate
                 )
             }
 
@@ -310,7 +316,8 @@ impl fmt::Display for RuntimeError {
                 write!(
                     f,
                     "Undefined variable \"{}\" {}",
-                    name.lexeme, name.coordinate
+                    name.with_lexeme(|lex| lex.to_string()),
+                    name.coordinate
                 )
             }
 
@@ -318,7 +325,8 @@ impl fmt::Display for RuntimeError {
                 write!(
                     f,
                     "Invalid logical operation \"{}\" {}",
-                    op.lexeme, op.coordinate
+                    op.with_lexeme(|lex| lex.to_string()),
+                    op.coordinate
                 )
             }
         }

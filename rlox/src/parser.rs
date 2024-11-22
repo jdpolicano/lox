@@ -19,6 +19,13 @@ const LITERALS: [TokenType; 5] = [
     TokenType::False,
     TokenType::Nil,
 ];
+const ASSIGNMENTS: [TokenType; 5] = [
+    TokenType::Equal,
+    TokenType::PlusEqual,
+    TokenType::MinusEqual,
+    TokenType::StarEqual,
+    TokenType::SlashEqual,
+];
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParseError {
@@ -42,13 +49,23 @@ impl Display for ParseError {
                 write!(f, "\n{}", msg)
             }
             ParseError::UnexpectedToken(msg, token) => {
-                write!(f, "Unexpected token {} {}", token.lexeme, token.coordinate)?;
+                write!(
+                    f,
+                    "Unexpected token {} {}",
+                    token.with_lexeme(|lex| lex.to_string()),
+                    token.coordinate
+                )?;
                 write!(f, "\n{}", msg)
             }
             ParseError::UnexpectedEndOfFile(token) => {
                 write!(f, "Unexpected end of file")?;
                 if let Some(token) = token {
-                    write!(f, " after token {} {}", token.lexeme, token.coordinate)?;
+                    write!(
+                        f,
+                        " after token {} {}",
+                        token.with_lexeme(|lex| lex.to_string()),
+                        token.coordinate
+                    )?;
                 }
                 Ok(())
             }
@@ -58,7 +75,8 @@ impl Display for ParseError {
                 write!(
                     f,
                     "Invalid assignment target: {} {}",
-                    token.lexeme, token.coordinate
+                    token.with_lexeme(|lex| lex.to_string()),
+                    token.coordinate
                 )
             }
         }
@@ -293,9 +311,15 @@ impl Parser {
     fn assignment(&mut self) -> Result<Expr, ParseError> {
         let expr = self.logical_or()?;
 
-        if let Some(tok) = self.match_exact(TokenType::Equal) {
+        if let Some(tok) = self.match_one_of(&ASSIGNMENTS) {
             if let Expr::Variable { name } = expr {
+                let tok = tok.clone();
                 let value = self.assignment()?;
+
+                if tok.token_type != TokenType::Equal {
+                    return desugar_assignment(name, tok.token_type, value);
+                }
+
                 return Ok(Expr::Assign {
                     name,
                     value: Box::new(value),
@@ -497,21 +521,29 @@ impl Parser {
     }
 }
 
-// This is so the parser can inject tokens into the tree
-// that aren't actually reflected in the source token stream.
-fn artificial_token(t: TokenType, v: Literal) -> Token {
-    Token::new(
-        t,
-        String::new(), // doesn't allocate
-        v,
-        Coordinate::default(),
-    )
-}
-
 fn literal_true() -> Expr {
     Expr::Literal {
-        value: artificial_token(TokenType::True, Literal::Boolean(true)),
+        value: Token::synthetic(TokenType::True, Literal::Boolean(true)),
     }
+}
+
+fn desugar_assignment(name: Token, t: TokenType, value: Expr) -> Result<Expr, ParseError> {
+    let t = match t {
+        TokenType::PlusEqual => Ok(TokenType::Plus),
+        TokenType::MinusEqual => Ok(TokenType::Minus),
+        TokenType::StarEqual => Ok(TokenType::Star),
+        TokenType::SlashEqual => Ok(TokenType::Slash),
+        _ => Err(ParseError::InvalidAssignmentTarget(name.clone())),
+    }?;
+
+    Ok(Expr::Assign {
+        name: name.clone(),
+        value: Box::new(Expr::Binary {
+            left: Box::new(Expr::Variable { name }),
+            operator: Token::synthetic(t, Literal::Nil),
+            right: Box::new(value),
+        }),
+    })
 }
 
 fn while_loop_with_increment(condition: Expr, body: Stmt, increment: Option<Stmt>) -> Stmt {
@@ -593,7 +625,7 @@ mod test {
     fn number(v: f64, i: usize, r: usize, c: usize) -> Token {
         Token::new(
             TokenType::Number,
-            v.to_string(),
+            Some(v.to_string()),
             Literal::Number(v),
             coordinate(i, r, c),
         )
@@ -602,7 +634,7 @@ mod test {
     fn string(v: String, i: usize, r: usize, c: usize) -> Token {
         Token::new(
             TokenType::String,
-            format!("\"{}\"", v),
+            Some(format!("\"{}\"", v)),
             Literal::String(v),
             coordinate(i, r, c),
         )
@@ -625,15 +657,11 @@ mod test {
             _ => panic!("Invalid operator"),
         };
 
-        Token::new(t, op.to_string(), Literal::Nil, coordinate(i, r, c))
+        Token::new(t, Some(op.to_string()), Literal::Nil, coordinate(i, r, c))
     }
 
     fn coordinate(i: usize, r: usize, c: usize) -> Coordinate {
-        Coordinate {
-            index: i,
-            line: r,
-            column: c,
-        }
+        Coordinate::new(i, r, c)
     }
 
     #[test]
