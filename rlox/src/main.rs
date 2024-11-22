@@ -1,7 +1,7 @@
 //use lox::cli::{Cli, CliError};
-use lox::interpreter::Interpreter;
-use lox::parser::{ParseError, Parser};
-use lox::scanner::Scanner;
+use rlox::interpreter::Interpreter;
+use rlox::parser::{ParseError, Parser};
+use rlox::scanner::Scanner;
 
 fn main() {
     let input = r#"
