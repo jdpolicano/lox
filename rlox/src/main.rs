@@ -6,10 +6,13 @@ use rlox::scanner::Scanner;
 fn main() {
     let input = r#"
         // prints from 0 -> 9
-        for (var i = 0; i < 1000000; i += 1) {
+        var name = "John";
 
+        fun sayHiTo(age) {
+            print "Hi " + name + " I heard your age is " + age;
         }
-        print i;
+
+        sayHiTo("30");
     "#;
     let tokens = Scanner::new(input).scan_tokens();
 

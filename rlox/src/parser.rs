@@ -1,5 +1,5 @@
 use crate::ast::{Expr, Stmt};
-use crate::token::{Coordinate, Literal, Token, TokenType};
+use crate::token::{Literal, Token, TokenType};
 use std::fmt::{self, Display};
 
 const EQUALITIES: [TokenType; 2] = [TokenType::BangEqual, TokenType::EqualEqual];
@@ -159,8 +159,58 @@ impl Parser {
     pub fn declaration(&mut self) -> Result<Stmt, ParseError> {
         if self.match_exact(TokenType::Var).is_some() {
             self.var_declaration()
+        } else if self.match_exact(TokenType::Fun).is_some() {
+            self.function()
         } else {
             self.statement()
+        }
+    }
+
+    pub fn function(&mut self) -> Result<Stmt, ParseError> {
+        let name = self
+            .expect("functions should have a name", TokenType::Identifier)?
+            .clone();
+
+        self.expect(
+            "function names should be followed by \"(\"",
+            TokenType::LeftParen,
+        )?;
+
+        let mut params = Vec::with_capacity(255);
+
+        if !self.next_is(TokenType::RightParen) {
+            loop {
+                let param = self
+                    .expect("expected a list of parameters", TokenType::Identifier)?
+                    .clone();
+                params.push(param);
+
+                if !self.match_exact(TokenType::Comma).is_some() {
+                    break;
+                }
+            }
+        }
+
+        self.expect(
+            "function declaration to close parens properly",
+            TokenType::RightParen,
+        )?;
+
+        self.expect(
+            "function to be followed by a block scope",
+            TokenType::LeftBrace,
+        )?;
+
+        let body = self.block()?;
+
+        match body {
+            Stmt::Block { statements } => Ok(Stmt::Function {
+                name,
+                params,
+                body: statements,
+            }),
+
+            _ => Err(ParseError::LikelyLogicalError),
         }
     }
 
@@ -315,11 +365,9 @@ impl Parser {
             if let Expr::Variable { name } = expr {
                 let tok = tok.clone();
                 let value = self.assignment()?;
-
                 if tok.token_type != TokenType::Equal {
                     return desugar_assignment(name, tok.token_type, value);
                 }
-
                 return Ok(Expr::Assign {
                     name,
                     value: Box::new(value),
@@ -438,7 +486,44 @@ impl Parser {
             });
         }
 
-        self.primary()
+        self.call()
+    }
+
+    fn call(&mut self) -> Result<Expr, ParseError> {
+        let mut expr = self.primary()?;
+        loop {
+            if self.match_exact(TokenType::LeftParen).is_some() {
+                expr = self.finish_call(expr)?;
+            } else {
+                break;
+            }
+        }
+        Ok(expr)
+    }
+
+    fn finish_call(&mut self, expr: Expr) -> Result<Expr, ParseError> {
+        let mut args = Vec::with_capacity(255); // max number of arguments.
+
+        if !self.next_is(TokenType::RightParen) {
+            loop {
+                args.push(self.expression()?);
+                if !self.match_exact(TokenType::Comma).is_some() {
+                    break;
+                };
+            }
+        }
+
+        if args.len() >= 255 {
+            println!("PARSER WARNING ENCOUNTERED FUNC CALL WITH MORE THAN 255 ARGUMENTS")
+        }
+
+        Ok(Expr::Call {
+            callee: Box::new(expr),
+            paren: self
+                .expect("function calls should end in \")\"", TokenType::RightParen)?
+                .clone(),
+            args,
+        })
     }
 
     fn primary(&mut self) -> Result<Expr, ParseError> {
@@ -591,7 +676,7 @@ fn desugar_for_loop(
 mod test {
     use super::*;
     use crate::scanner::Scanner;
-    use crate::token::{Coordinate, Literal};
+    use crate::token::Coordinate;
 
     fn expression_stmt(expr: Expr) -> Stmt {
         Stmt::Expression { expression: expr }

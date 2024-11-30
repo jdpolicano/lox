@@ -1,22 +1,39 @@
 use crate::ast::{Expr, ExprVisitor, Stmt, StmtVisitor};
 use crate::environment::Environment;
-use crate::token::{Literal, Token, TokenType};
+use crate::native::{Clock, LoxFunction};
+use crate::primitive::LoxObject;
+use crate::token::{Token, TokenType};
 use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
 
-type InterpreterResult = Result<Literal, RuntimeError>;
+type InterpreterResult = Result<LoxObject, RuntimeError>;
 
 // this will eventually have state;
 pub struct Interpreter {
+    globals: Rc<RefCell<Environment>>,
     environment: Rc<RefCell<Environment>>,
 }
 
 impl Interpreter {
     pub fn new() -> Interpreter {
+        let globals = Self::get_global_env();
+        let environment = Rc::new(RefCell::new(Environment::new(Some(globals.clone()))));
+
         Interpreter {
-            environment: Rc::new(RefCell::new(Environment::new(None))),
+            globals,
+            environment,
         }
+    }
+
+    fn get_global_env() -> Rc<RefCell<Environment>> {
+        let mut env = Environment::new(None);
+        env.define(
+            "clock".to_string(),
+            LoxObject::Function(Rc::new(RefCell::new(Clock))),
+        );
+        // todo - add the rest of the native apis...
+        Rc::new(RefCell::new(env))
     }
 
     pub fn interpret(&mut self, stmts: &[Stmt]) -> Result<(), RuntimeError> {
@@ -26,12 +43,41 @@ impl Interpreter {
         Ok(())
     }
 
-    pub fn create_new_environment(
+    pub fn create_new_environment(&mut self) -> Rc<RefCell<Environment>> {
+        Rc::new(RefCell::new(Environment::new(Some(
+            self.environment.clone(),
+        )))) // Parent is set to original environment
+    }
+
+    pub fn set_env(&mut self, new_env: Rc<RefCell<Environment>>) {
+        self.environment = new_env;
+    }
+
+    pub fn execute_block(
         &mut self,
-    ) -> (Rc<RefCell<Environment>>, Rc<RefCell<Environment>>) {
-        let origin = self.environment.clone(); // Capture the original environment
-        let new_env = Rc::new(RefCell::new(Environment::new(Some(origin.clone())))); // Parent is set to original environment
-        (origin, new_env)
+        new_env: Rc<RefCell<Environment>>,
+        statements: &[Stmt],
+    ) -> InterpreterResult {
+        let origin = self.environment.clone();
+        self.environment = new_env;
+
+        for stmt in statements {
+            match stmt.accept(self) {
+                // handle a potential break statement.
+                Ok(v) if is_truthy(&v) => {
+                    self.environment = origin; // Restore original environment
+                    return Ok(v);
+                }
+                Err(e) => {
+                    self.environment = origin; // Restore original environment
+                    return Err(e);
+                }
+                _ => {}
+            }
+        }
+
+        self.environment = origin; // Restore original environment after block execution
+        Ok(LoxObject::Nil)
     }
 }
 
@@ -52,7 +98,7 @@ impl ExprVisitor<InterpreterResult> for Interpreter {
     }
 
     fn visit_literal(&mut self, literal: Token) -> InterpreterResult {
-        Ok(literal.literal)
+        Ok(literal.literal.into())
     }
 
     fn visit_unary(&mut self, operator: Token, right: Box<Expr>) -> InterpreterResult {
@@ -92,54 +138,54 @@ impl ExprVisitor<InterpreterResult> for Interpreter {
             _ => Err(RuntimeError::InvalidLogicalOp(operator)),
         }
     }
+
+    fn visit_call(
+        &mut self,
+        callee: Box<Expr>,
+        paren: Token,    // to do, use these...
+        args: Vec<Expr>, // to do, use these...
+    ) -> InterpreterResult {
+        let mut eval_args = Vec::with_capacity(args.len());
+
+        for arg in args {
+            eval_args.push(arg.accept(self)?);
+        }
+
+        match callee.accept(self)? {
+            LoxObject::Function(f) => f.borrow().call(self, &eval_args),
+            other => Err(RuntimeError::Uncallable(other, paren)),
+        }
+    }
 }
 
 impl StmtVisitor<InterpreterResult> for Interpreter {
     fn visit_expression(&mut self, expression: Expr) -> InterpreterResult {
         expression.accept(self)?;
-        Ok(Literal::Nil)
+        Ok(LoxObject::Nil)
     }
 
     fn visit_print(&mut self, expression: Expr) -> InterpreterResult {
         let value = expression.accept(self)?;
         println!("{}", value);
-        Ok(Literal::Nil)
+        Ok(LoxObject::Nil)
     }
 
     fn visit_var(&mut self, name: Token, initializer: Option<Expr>) -> InterpreterResult {
         let value = initializer
             .map(|e| e.accept(self))
-            .unwrap_or(Ok(Literal::Nil))?;
+            .unwrap_or(Ok(LoxObject::Nil))?;
 
         //TODO - should check that the variable isn't declared already.
         self.environment
             .borrow_mut()
             .define(name.with_lexeme(|lex| lex.to_string()), value);
 
-        Ok(Literal::Nil)
+        Ok(LoxObject::Nil)
     }
 
     fn visit_block(&mut self, statements: Vec<Stmt>) -> InterpreterResult {
-        let (origin, new) = self.create_new_environment();
-        self.environment = new;
-
-        for stmt in statements {
-            match stmt.accept(self) {
-                // handle a potential break statement.
-                Ok(v) if is_truthy(&v) => {
-                    self.environment = origin; // Restore original environment
-                    return Ok(v);
-                }
-                Err(e) => {
-                    self.environment = origin; // Restore original environment
-                    return Err(e);
-                }
-                _ => {}
-            }
-        }
-
-        self.environment = origin; // Restore original environment after block execution
-        Ok(Literal::Nil)
+        let new = self.create_new_environment();
+        self.execute_block(new, &statements)
     }
 
     fn visit_if(
@@ -154,7 +200,7 @@ impl StmtVisitor<InterpreterResult> for Interpreter {
         } else if let Some(else_branch) = else_branch {
             else_branch.accept(self)
         } else {
-            Ok(Literal::Nil)
+            Ok(LoxObject::Nil)
         }
     }
 
@@ -164,53 +210,68 @@ impl StmtVisitor<InterpreterResult> for Interpreter {
                 break;
             }
         }
-        Ok(Literal::Nil)
+        Ok(LoxObject::Nil)
     }
 
     fn visit_break(&mut self, _: Token) -> InterpreterResult {
-        Ok(Literal::Boolean(true))
+        Ok(LoxObject::Boolean(true))
+    }
+
+    fn visit_function(
+        &mut self,
+        name: Token,
+        params: Vec<Token>,
+        body: Vec<Stmt>,
+    ) -> InterpreterResult {
+        let map_key_name = name.with_lexeme(|l| l.to_string());
+        let func = LoxFunction::new(name, params, body, self.environment.clone());
+        self.environment.borrow_mut().define(
+            map_key_name,
+            LoxObject::Function(Rc::new(RefCell::new(func))),
+        );
+        Ok(LoxObject::Nil)
     }
 }
 
-fn either_is_string(left: &Literal, right: &Literal) -> bool {
+fn either_is_string(left: &LoxObject, right: &LoxObject) -> bool {
     match (left, right) {
-        (Literal::String(_), _) => true,
-        (_, Literal::String(_)) => true,
+        (LoxObject::String(_), _) => true,
+        (_, LoxObject::String(_)) => true,
         _ => false,
     }
 }
 
-fn concatenate(left: Literal, right: Literal) -> String {
+fn concatenate(left: LoxObject, right: LoxObject) -> String {
     format!("{}{}", left, right)
 }
 
 fn math_op_with_check(
-    left: &Literal,
-    right: &Literal,
+    left: &LoxObject,
+    right: &LoxObject,
     f: fn(f64, f64) -> f64,
-) -> Result<Literal, ()> {
+) -> Result<LoxObject, ()> {
     match (left, right) {
-        (Literal::Number(a), Literal::Number(b)) => Ok(Literal::Number(f(*a, *b))),
+        (LoxObject::Number(a), LoxObject::Number(b)) => Ok(LoxObject::Number(f(*a, *b))),
         _ => Err(()),
     }
 }
 
 fn math_compare_with_check(
-    left: &Literal,
-    right: &Literal,
+    left: &LoxObject,
+    right: &LoxObject,
     f: fn(f64, f64) -> bool,
-) -> Result<Literal, ()> {
+) -> Result<LoxObject, ()> {
     match (left, right) {
-        (Literal::Number(a), Literal::Number(b)) => Ok(Literal::Boolean(f(*a, *b))),
+        (LoxObject::Number(a), LoxObject::Number(b)) => Ok(LoxObject::Boolean(f(*a, *b))),
         _ => Err(()),
     }
 }
 
-fn apply_binary(left: Literal, operator: Token, right: Literal) -> InterpreterResult {
+fn apply_binary(left: LoxObject, operator: Token, right: LoxObject) -> InterpreterResult {
     let result = match operator.token_type {
         TokenType::Plus => {
             if either_is_string(&left, &right) {
-                return Ok(Literal::String(concatenate(left, right)));
+                return Ok(LoxObject::String(concatenate(left, right)));
             }
             math_op_with_check(&left, &right, |a, b| a + b)
         }
@@ -221,8 +282,8 @@ fn apply_binary(left: Literal, operator: Token, right: Literal) -> InterpreterRe
         TokenType::GreaterEqual => math_compare_with_check(&left, &right, |a, b| a >= b),
         TokenType::Less => math_compare_with_check(&left, &right, |a, b| a < b),
         TokenType::LessEqual => math_compare_with_check(&left, &right, |a, b| a <= b),
-        TokenType::BangEqual => Ok(Literal::Boolean(left != right)),
-        TokenType::EqualEqual => Ok(Literal::Boolean(left == right)),
+        TokenType::BangEqual => Ok(LoxObject::Boolean(left != right)),
+        TokenType::EqualEqual => Ok(LoxObject::Boolean(left == right)),
         _ => panic!("Unrecoverable error: invalid operator in binary expression."),
     };
 
@@ -230,10 +291,10 @@ fn apply_binary(left: Literal, operator: Token, right: Literal) -> InterpreterRe
         return get_binary_error(left, operator, right);
     }
 
-    Ok(result.unwrap())
+    Ok(result.unwrap().into())
 }
 
-fn get_binary_error(left: Literal, operator: Token, right: Literal) -> InterpreterResult {
+fn get_binary_error(left: LoxObject, operator: Token, right: LoxObject) -> InterpreterResult {
     match operator.token_type {
         TokenType::Plus | TokenType::Minus | TokenType::Star | TokenType::Slash => Err(
             RuntimeError::InvalidMathOp(format!("{}", left), operator, format!("{}", right)),
@@ -249,22 +310,22 @@ fn get_binary_error(left: Literal, operator: Token, right: Literal) -> Interpret
     }
 }
 
-fn apply_unary(operator: Token, right: Literal) -> InterpreterResult {
+fn apply_unary(operator: Token, right: LoxObject) -> InterpreterResult {
     match operator.token_type {
         TokenType::Minus => match right {
-            Literal::Number(n) => Ok(Literal::Number(-n)),
+            LoxObject::Number(n) => Ok(LoxObject::Number(-n)),
             _ => Err(RuntimeError::InvalidUnaryOp(operator, format!("{}", right))),
         },
 
-        TokenType::Bang => Ok(Literal::Boolean(!is_truthy(&right))),
+        TokenType::Bang => Ok(LoxObject::Boolean(!is_truthy(&right.into()))),
         _ => panic!("Unrecoverable error: invalid operator in unary expression."),
     }
 }
 
-fn is_truthy(literal: &Literal) -> bool {
+fn is_truthy(literal: &LoxObject) -> bool {
     match literal {
-        Literal::Boolean(b) => *b,
-        Literal::Nil => false,
+        LoxObject::Boolean(b) => *b,
+        LoxObject::Nil => false,
         _ => true,
     }
 }
@@ -276,6 +337,8 @@ pub enum RuntimeError {
     InvalidUnaryOp(Token, String),
     InvalidLogicalOp(Token),
     UndefinedVariable(Token),
+    Uncallable(LoxObject, Token),
+    Native(String),
 }
 
 impl fmt::Display for RuntimeError {
@@ -328,6 +391,18 @@ impl fmt::Display for RuntimeError {
                     op.with_lexeme(|lex| lex.to_string()),
                     op.coordinate
                 )
+            }
+
+            RuntimeError::Uncallable(obj, tok) => {
+                write!(
+                    f,
+                    "Invalid call expression trying to call literal value -> {} {}",
+                    obj, tok.coordinate
+                )
+            }
+
+            RuntimeError::Native(s) => {
+                write!(f, "{}", s)
             }
         }
     }

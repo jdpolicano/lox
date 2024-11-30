@@ -1,4 +1,4 @@
-use crate::token::Literal;
+use crate::primitive::LoxObject;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -10,7 +10,7 @@ pub enum EnvironmentError {
 
 #[derive(Debug)]
 pub struct Environment {
-    values: HashMap<String, Literal>,
+    values: HashMap<String, LoxObject>,
     parent: Option<Rc<RefCell<Environment>>>,
 }
 
@@ -22,11 +22,18 @@ impl Environment {
         }
     }
 
-    pub fn define(&mut self, k: String, v: Literal) {
+    pub fn deep_clone(&self) -> Self {
+        Self {
+            values: self.values.clone(),
+            parent: self.parent.clone(),
+        }
+    }
+
+    pub fn define(&mut self, k: String, v: LoxObject) {
         self.values.insert(k, v);
     }
 
-    pub fn get(&mut self, k: &str) -> Option<Literal> {
+    pub fn get(&mut self, k: &str) -> Option<LoxObject> {
         if let Some(v) = self.values.get(k) {
             return Some(v.clone());
         }
@@ -38,7 +45,7 @@ impl Environment {
         }
     }
 
-    pub fn assign(&mut self, k: String, v: Literal) -> Result<(), ()> {
+    pub fn assign(&mut self, k: String, v: LoxObject) -> Result<(), ()> {
         if self.values.contains_key(&k) {
             self.values.get_mut(&k).map(|x| *x = v);
             Ok(())
@@ -47,5 +54,10 @@ impl Environment {
         } else {
             Err(())
         }
+    }
+
+    pub fn print_map(&self) {
+        let msg: String = self.values.iter().map(|(k, v)| format!("{k}{v}")).collect();
+        println!("msg {}", msg);
     }
 }

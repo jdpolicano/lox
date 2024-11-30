@@ -57,7 +57,7 @@ pub enum TokenType {
     Eof,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Literal {
     Number(f64),
     String(String),
@@ -72,23 +72,6 @@ impl fmt::Display for Literal {
             Literal::String(value) => write!(f, "{}", value),
             Literal::Boolean(value) => write!(f, "{}", value),
             Literal::Nil => write!(f, "nil"),
-        }
-    }
-}
-
-impl Literal {
-    pub fn is_truthy(&self) -> bool {
-        match self {
-            Literal::Boolean(value) => *value,
-            Literal::Nil => false,
-            _ => true,
-        }
-    }
-
-    pub fn to_number(&self) -> Result<f64, &'static str> {
-        match self {
-            Literal::Number(value) => Ok(*value),
-            _ => Err("Cannot convert to number"),
         }
     }
 }
@@ -175,7 +158,7 @@ impl Token {
         T: FnOnce(&str) -> R,
     {
         if let Some(ref lex) = self.lexeme {
-            f(lex)
+            f(lex.as_str())
         } else {
             f("")
         }

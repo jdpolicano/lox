@@ -1,4 +1,5 @@
 use crate::token::{Coordinate, Literal, Token, TokenType};
+
 use std::iter::{Iterator, Peekable};
 use std::str::CharIndices;
 
@@ -97,12 +98,11 @@ impl<'a> Scanner<'a> {
 
                 Ok(self.simple_token(TokenType::Dot, (ch, coordinate)))
             }
-            //'-' => Ok(self.simple_token(TokenType::Minus, (ch, coordinate))),
             '-' => {
                 let toke = if self.match_char('=') {
                     self.multi_char_token(TokenType::MinusEqual, "-=".to_string(), coordinate)
                 } else {
-                    self.simple_token(TokenType::Plus, (ch, coordinate))
+                    self.simple_token(TokenType::Minus, (ch, coordinate))
                 };
                 Ok(toke)
             }

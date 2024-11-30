@@ -47,6 +47,12 @@ define_ast! {
             expression: Box<Expr>,
         },
 
+        Call visit_call {
+            callee: Box<Expr>,
+            paren: Token,
+            args: Vec<Expr>
+        },
+
         Unary visit_unary {
             operator: Token,
             right: Box<Expr>,
@@ -104,5 +110,11 @@ define_ast! {
         Break visit_break {
             keyword: Token,
         },
+
+        Function visit_function {
+            name: Token,
+            params: Vec<Token>,
+            body: Vec<Stmt>
+        }
     }
 }
