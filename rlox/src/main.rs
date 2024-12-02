@@ -6,16 +6,22 @@ use rlox::language::scanner::Scanner;
 
 fn main() {
     let input = r#"
-        var a = "global";
-        {
-          fun showA() {
-            print a;
-          }
-
-          showA();
-          var a = "block";
-          showA();
+        fun fib(n) {
+            if (n <= 1) return n;
+            var a = 0;
+            var b = 1;
+            while (n > 1) {
+                var c = a + b;
+                a = b;
+                b = c;
+                n = n - 1;
+            }
+            return b;
         }
+
+        var start = clock();
+        print fib(100000);
+        print clock() - start;
     "#;
     let tokens = Scanner::new(input).scan_tokens();
 

@@ -28,10 +28,7 @@ impl LoxVisitor {
 
     fn get_global_env() -> Rc<RefCell<Environment>> {
         let mut env = Environment::new(None);
-        env.define(
-            "clock".to_string(),
-            LoxObject::Function(Rc::new(RefCell::new(Clock))),
-        );
+        env.define("clock".to_string(), LoxObject::Function(Rc::new(Clock)));
         // todo - add the rest of the native apis...
         Rc::new(RefCell::new(env))
     }
@@ -150,14 +147,14 @@ impl ExprVisitor<InterpreterResult> for LoxVisitor {
         }
 
         match callee.accept(self)? {
-            LoxObject::Function(f) => f.borrow().call(self, &eval_args),
+            LoxObject::Function(f) => f.call(self, &eval_args),
             other => Err(RuntimeError::Uncallable(other, paren)),
         }
     }
 
     fn visit_function(&mut self, params: Vec<Token>, body: Vec<Stmt>) -> InterpreterResult {
         let func = LoxFunction::new(None, params, body, self.environment.clone());
-        Ok(LoxObject::Function(Rc::new(RefCell::new(func))))
+        Ok(LoxObject::Function(Rc::new(func)))
     }
 }
 
@@ -236,10 +233,9 @@ impl StmtVisitor<InterpreterResult> for LoxVisitor {
     ) -> InterpreterResult {
         let map_key_name = name.lexeme_or_empty();
         let func = LoxFunction::new(Some(name), params, body, self.environment.clone());
-        self.environment.borrow_mut().define(
-            map_key_name,
-            LoxObject::Function(Rc::new(RefCell::new(func))),
-        );
+        self.environment
+            .borrow_mut()
+            .define(map_key_name, LoxObject::Function(Rc::new(func)));
         Ok(LoxObject::Nil)
     }
 }

@@ -1,7 +1,6 @@
 use crate::interpreter::errors::RuntimeError;
 use crate::interpreter::visitor::LoxVisitor;
 use crate::language::token::Literal;
-use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
 
@@ -12,7 +11,7 @@ pub enum LoxObject {
     Boolean(bool),
     Nil,
     Exit(Box<LoxObject>),
-    Function(Rc<RefCell<dyn Callable>>),
+    Function(Rc<dyn Callable>),
 }
 
 impl fmt::Display for LoxObject {
