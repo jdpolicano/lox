@@ -1,4 +1,4 @@
-use crate::token::{Coordinate, Literal, Token, TokenType};
+use crate::language::token::{Coordinate, Literal, Token, TokenType};
 
 use std::iter::{Iterator, Peekable};
 use std::str::CharIndices;

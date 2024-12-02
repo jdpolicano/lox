@@ -1,5 +1,6 @@
-use crate::interpreter::{Interpreter, RuntimeError};
-use crate::token::Literal;
+use crate::interpreter::errors::RuntimeError;
+use crate::interpreter::visitor::LoxVisitor;
+use crate::language::token::Literal;
 use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
@@ -10,6 +11,7 @@ pub enum LoxObject {
     String(String),
     Boolean(bool),
     Nil,
+    Exit(Box<LoxObject>),
     Function(Rc<RefCell<dyn Callable>>),
 }
 
@@ -20,7 +22,8 @@ impl fmt::Display for LoxObject {
             LoxObject::String(value) => write!(f, "{}", value),
             LoxObject::Boolean(value) => write!(f, "{}", value),
             LoxObject::Nil => write!(f, "nil"),
-            LoxObject::Function(_) => write!(f, "[__object__]"),
+            LoxObject::Exit(v) => write!(f, "{}", v),
+            LoxObject::Function(_) => write!(f, "f()[__object__]"),
         }
     }
 }
@@ -54,7 +57,7 @@ where
 {
     fn call(
         &self,
-        interpreter: &mut Interpreter,
+        interpreter: &mut LoxVisitor,
         args: &[LoxObject],
     ) -> Result<LoxObject, RuntimeError>;
 

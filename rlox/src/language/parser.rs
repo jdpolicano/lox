@@ -1,6 +1,6 @@
-use crate::ast::{Expr, Stmt};
-use crate::token::{Literal, Token, TokenType};
-use std::fmt::{self, Display};
+use crate::language::ast::{Expr, Stmt};
+use crate::language::errors::ParseError;
+use crate::language::token::{Literal, Token, TokenType};
 
 const EQUALITIES: [TokenType; 2] = [TokenType::BangEqual, TokenType::EqualEqual];
 const COMPARISONS: [TokenType; 4] = [
@@ -26,62 +26,6 @@ const ASSIGNMENTS: [TokenType; 5] = [
     TokenType::StarEqual,
     TokenType::SlashEqual,
 ];
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum ParseError {
-    TokenAssertionFailure(&'static str, TokenType, Token),
-    UnexpectedToken(&'static str, Token),
-    UnexpectedEndOfFile(Option<Token>),
-    InvalidAssignmentTarget(Token),
-    LikelyLogicalError, // This is a catch-all for errors that are likely to be logical errors in the parser
-}
-
-impl Display for ParseError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "ParseError: ")?;
-        match self {
-            ParseError::TokenAssertionFailure(msg, expected, token) => {
-                write!(
-                    f,
-                    "Expected token of type \"{:?}\" but got token \"{:?}\" {}",
-                    expected, token.token_type, token.coordinate
-                )?;
-                write!(f, "\n{}", msg)
-            }
-            ParseError::UnexpectedToken(msg, token) => {
-                write!(
-                    f,
-                    "Unexpected token {} {}",
-                    token.with_lexeme(|lex| lex.to_string()),
-                    token.coordinate
-                )?;
-                write!(f, "\n{}", msg)
-            }
-            ParseError::UnexpectedEndOfFile(token) => {
-                write!(f, "Unexpected end of file")?;
-                if let Some(token) = token {
-                    write!(
-                        f,
-                        " after token {} {}",
-                        token.with_lexeme(|lex| lex.to_string()),
-                        token.coordinate
-                    )?;
-                }
-                Ok(())
-            }
-            ParseError::LikelyLogicalError => write!(f, "Likely logical error with your parser..."),
-
-            ParseError::InvalidAssignmentTarget(token) => {
-                write!(
-                    f,
-                    "Invalid assignment target: {} {}",
-                    token.with_lexeme(|lex| lex.to_string()),
-                    token.coordinate
-                )
-            }
-        }
-    }
-}
 
 #[derive(Debug)]
 pub struct TokenStream {
@@ -160,19 +104,19 @@ impl Parser {
         if self.match_exact(TokenType::Var).is_some() {
             self.var_declaration()
         } else if self.match_exact(TokenType::Fun).is_some() {
-            self.function()
+            self.function_declaration()
         } else {
             self.statement()
         }
     }
 
-    pub fn function(&mut self) -> Result<Stmt, ParseError> {
+    pub fn function_declaration(&mut self) -> Result<Stmt, ParseError> {
         let name = self
             .expect("functions should have a name", TokenType::Identifier)?
             .clone();
 
         self.expect(
-            "function names should be followed by \"(\"",
+            "function dec should be followed by \"(\"",
             TokenType::LeftParen,
         )?;
 
@@ -238,18 +182,36 @@ impl Parser {
             self.loop_statment()
         } else if self.next_is(TokenType::Break) {
             self.break_statement()
+        } else if self.next_is(TokenType::Return) {
+            self.return_statement()
         } else {
             self.expression_statement()
         }
     }
 
+    fn return_statement(&mut self) -> Result<Stmt, ParseError> {
+        let keyword = self.take_token()?.clone();
+        let value = if self.next_is(TokenType::Semicolon) {
+            None
+        } else {
+            Some(self.expression()?)
+        };
+        self.expect("unterminated return statement", TokenType::Semicolon)?;
+        Ok(Stmt::Return { keyword, value })
+    }
+
     fn break_statement(&mut self) -> Result<Stmt, ParseError> {
         let keyword = self.take_token()?.clone();
         if !self.is_in_loop {
-            return Err(ParseError::UnexpectedToken(
-                "\"break\" can only occur inside a loop",
-                keyword,
-            ));
+            // return Err(ParseError::UnexpectedToken(
+            //     "\"break\" can only occur inside a loop",
+            //     keyword,
+            // ));
+            return Err(ParseError::UnexpectedToken {
+                msg: "\"break\" can only occur inside a loop",
+                token_lexeme: keyword.lexeme_or_empty(),
+                coordinate: keyword.coordinate,
+            });
         }
         self.expect("unterminated \"break\"", TokenType::Semicolon)?;
         Ok(Stmt::Break { keyword })
@@ -373,7 +335,10 @@ impl Parser {
                     value: Box::new(value),
                 });
             } else {
-                return Err(ParseError::InvalidAssignmentTarget(tok.clone()));
+                return Err(ParseError::InvalidAssignmentTarget {
+                    token_lexeme: tok.lexeme_or_empty(),
+                    coordinate: tok.coordinate.clone(),
+                });
             }
         }
 
@@ -545,7 +510,58 @@ impl Parser {
             });
         }
 
-        Err(ParseError::UnexpectedToken("unexpected primary", tok))
+        if tok.token_type == TokenType::Fun {
+            return self.function_expression();
+        }
+
+        Err(ParseError::UnexpectedToken {
+            msg: "parsing \"primary\"",
+            token_lexeme: tok.lexeme_or_empty(),
+            coordinate: tok.coordinate,
+        })
+    }
+
+    fn function_expression(&mut self) -> Result<Expr, ParseError> {
+        self.expect(
+            "function expression should be followed by \"(\"",
+            TokenType::LeftParen,
+        )?;
+
+        let mut params = Vec::with_capacity(255);
+
+        if !self.next_is(TokenType::RightParen) {
+            loop {
+                let param = self
+                    .expect("expected a list of parameters", TokenType::Identifier)?
+                    .clone();
+                params.push(param);
+
+                if !self.match_exact(TokenType::Comma).is_some() {
+                    break;
+                }
+            }
+        }
+
+        self.expect(
+            "function declaration to close parens properly",
+            TokenType::RightParen,
+        )?;
+
+        self.expect(
+            "function to be followed by a block scope",
+            TokenType::LeftBrace,
+        )?;
+
+        let body = self.block()?;
+
+        match body {
+            Stmt::Block { statements } => Ok(Expr::Function {
+                params,
+                body: statements,
+            }),
+
+            _ => Err(ParseError::LikelyLogicalError),
+        }
     }
 
     fn syncronize(&mut self) {
@@ -576,7 +592,12 @@ impl Parser {
             if tok.token_type == t {
                 Ok(tok)
             } else {
-                Err(ParseError::TokenAssertionFailure(msg, t, tok.clone()))
+                Err(ParseError::TokenAssertionFailure {
+                    msg,
+                    expected: t,
+                    found: tok.token_type,
+                    coordinate: tok.coordinate.clone(),
+                })
             }
         })
     }
@@ -618,7 +639,10 @@ fn desugar_assignment(name: Token, t: TokenType, value: Expr) -> Result<Expr, Pa
         TokenType::MinusEqual => Ok(TokenType::Minus),
         TokenType::StarEqual => Ok(TokenType::Star),
         TokenType::SlashEqual => Ok(TokenType::Slash),
-        _ => Err(ParseError::InvalidAssignmentTarget(name.clone())),
+        _ => Err(ParseError::InvalidAssignmentTarget {
+            token_lexeme: name.lexeme_or_empty(),
+            coordinate: name.coordinate.clone(),
+        }),
     }?;
 
     Ok(Expr::Assign {
@@ -675,8 +699,8 @@ fn desugar_for_loop(
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::scanner::Scanner;
-    use crate::token::Coordinate;
+    use crate::language::scanner::Scanner;
+    use crate::language::token::Coordinate;
 
     fn expression_stmt(expr: Expr) -> Stmt {
         Stmt::Expression { expression: expr }

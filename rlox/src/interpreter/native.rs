@@ -1,8 +1,9 @@
-use crate::ast::Stmt;
-use crate::environment::Environment;
-use crate::interpreter::{Interpreter, RuntimeError};
-use crate::primitive::{Callable, LoxObject};
-use crate::token::Token;
+use crate::interpreter::environment::Environment;
+use crate::interpreter::errors::RuntimeError;
+use crate::interpreter::primitive::{Callable, LoxObject};
+use crate::interpreter::visitor::LoxVisitor;
+use crate::language::ast::Stmt;
+use crate::language::token::Token;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -10,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 // the function type.
 #[derive(Debug)]
 pub struct LoxFunction {
-    _name: Token,
+    _name: Option<Token>,
     params: Vec<Token>,
     body: Vec<Stmt>,
     closure: Rc<RefCell<Environment>>,
@@ -18,7 +19,7 @@ pub struct LoxFunction {
 
 impl LoxFunction {
     pub fn new(
-        name: Token,
+        name: Option<Token>,
         params: Vec<Token>,
         body: Vec<Stmt>,
         closure: Rc<RefCell<Environment>>,
@@ -39,18 +40,22 @@ impl Callable for LoxFunction {
 
     fn call(
         &self,
-        interpreter: &mut Interpreter,
+        interpreter: &mut LoxVisitor,
         args: &[LoxObject],
     ) -> Result<LoxObject, RuntimeError> {
-        let fresh_env = self.closure.clone();
+        let fresh_env = Environment::new_rc(Some(self.closure.clone()));
 
         for (param, value) in self.params.iter().zip(args.iter()) {
             fresh_env
                 .borrow_mut()
-                .define(param.with_lexeme(|l| l.to_string()), value.clone());
+                .define(param.lexeme_or_empty(), value.clone());
         }
 
-        interpreter.execute_block(fresh_env, &self.body)
+        let v = interpreter.execute_block(fresh_env, &self.body)?;
+        match v {
+            LoxObject::Exit(v) => Ok(*v),
+            _ => Ok(v),
+        }
     }
 }
 
@@ -62,7 +67,7 @@ impl Callable for Clock {
         0
     }
 
-    fn call(&self, _: &mut Interpreter, _: &[LoxObject]) -> Result<LoxObject, RuntimeError> {
+    fn call(&self, _: &mut LoxVisitor, _: &[LoxObject]) -> Result<LoxObject, RuntimeError> {
         let t = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_err(|e| RuntimeError::Native(format!("{e}")))?;

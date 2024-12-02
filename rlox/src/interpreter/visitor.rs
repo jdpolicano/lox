@@ -1,26 +1,26 @@
-use crate::ast::{Expr, ExprVisitor, Stmt, StmtVisitor};
-use crate::environment::Environment;
-use crate::native::{Clock, LoxFunction};
-use crate::primitive::LoxObject;
-use crate::token::{Token, TokenType};
+use crate::interpreter::environment::Environment;
+use crate::interpreter::errors::RuntimeError;
+use crate::interpreter::native::{Clock, LoxFunction};
+use crate::interpreter::primitive::LoxObject;
+use crate::language::ast::{Expr, ExprVisitor, Stmt, StmtVisitor};
+use crate::language::token::{Token, TokenType};
 use std::cell::RefCell;
-use std::fmt;
 use std::rc::Rc;
 
 type InterpreterResult = Result<LoxObject, RuntimeError>;
 
 // this will eventually have state;
-pub struct Interpreter {
+pub struct LoxVisitor {
     globals: Rc<RefCell<Environment>>,
     environment: Rc<RefCell<Environment>>,
 }
 
-impl Interpreter {
-    pub fn new() -> Interpreter {
+impl LoxVisitor {
+    pub fn new() -> LoxVisitor {
         let globals = Self::get_global_env();
-        let environment = Rc::new(RefCell::new(Environment::new(Some(globals.clone()))));
+        let environment = Environment::new_rc(Some(globals.clone()));
 
-        Interpreter {
+        LoxVisitor {
             globals,
             environment,
         }
@@ -44,9 +44,7 @@ impl Interpreter {
     }
 
     pub fn create_new_environment(&mut self) -> Rc<RefCell<Environment>> {
-        Rc::new(RefCell::new(Environment::new(Some(
-            self.environment.clone(),
-        )))) // Parent is set to original environment
+        Environment::new_rc(Some(self.environment.clone())) // Parent is set to original environment
     }
 
     pub fn set_env(&mut self, new_env: Rc<RefCell<Environment>>) {
@@ -64,9 +62,9 @@ impl Interpreter {
         for stmt in statements {
             match stmt.accept(self) {
                 // handle a potential break statement.
-                Ok(v) if is_truthy(&v) => {
+                Ok(LoxObject::Exit(v)) => {
                     self.environment = origin; // Restore original environment
-                    return Ok(v);
+                    return Ok(LoxObject::Exit(v));
                 }
                 Err(e) => {
                     self.environment = origin; // Restore original environment
@@ -81,7 +79,7 @@ impl Interpreter {
     }
 }
 
-impl ExprVisitor<InterpreterResult> for Interpreter {
+impl ExprVisitor<InterpreterResult> for LoxVisitor {
     fn visit_binary(
         &mut self,
         left: Box<Expr>,
@@ -156,9 +154,14 @@ impl ExprVisitor<InterpreterResult> for Interpreter {
             other => Err(RuntimeError::Uncallable(other, paren)),
         }
     }
+
+    fn visit_function(&mut self, params: Vec<Token>, body: Vec<Stmt>) -> InterpreterResult {
+        let func = LoxFunction::new(None, params, body, self.environment.clone());
+        Ok(LoxObject::Function(Rc::new(RefCell::new(func))))
+    }
 }
 
-impl StmtVisitor<InterpreterResult> for Interpreter {
+impl StmtVisitor<InterpreterResult> for LoxVisitor {
     fn visit_expression(&mut self, expression: Expr) -> InterpreterResult {
         expression.accept(self)?;
         Ok(LoxObject::Nil)
@@ -214,7 +217,15 @@ impl StmtVisitor<InterpreterResult> for Interpreter {
     }
 
     fn visit_break(&mut self, _: Token) -> InterpreterResult {
-        Ok(LoxObject::Boolean(true))
+        Ok(LoxObject::Exit(Box::new(LoxObject::Nil)))
+    }
+
+    fn visit_return(&mut self, _keyword: Token, value: Option<Expr>) -> InterpreterResult {
+        Ok(LoxObject::Exit(Box::new(
+            value
+                .map(|v| v.accept(self))
+                .unwrap_or(Ok(LoxObject::Nil))?,
+        )))
     }
 
     fn visit_function(
@@ -223,8 +234,8 @@ impl StmtVisitor<InterpreterResult> for Interpreter {
         params: Vec<Token>,
         body: Vec<Stmt>,
     ) -> InterpreterResult {
-        let map_key_name = name.with_lexeme(|l| l.to_string());
-        let func = LoxFunction::new(name, params, body, self.environment.clone());
+        let map_key_name = name.lexeme_or_empty();
+        let func = LoxFunction::new(Some(name), params, body, self.environment.clone());
         self.environment.borrow_mut().define(
             map_key_name,
             LoxObject::Function(Rc::new(RefCell::new(func))),
@@ -327,83 +338,5 @@ fn is_truthy(literal: &LoxObject) -> bool {
         LoxObject::Boolean(b) => *b,
         LoxObject::Nil => false,
         _ => true,
-    }
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub enum RuntimeError {
-    InvalidMathOp(String, Token, String),
-    InvalidComparisonOp(String, Token, String),
-    InvalidUnaryOp(Token, String),
-    InvalidLogicalOp(Token),
-    UndefinedVariable(Token),
-    Uncallable(LoxObject, Token),
-    Native(String),
-}
-
-impl fmt::Display for RuntimeError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "RuntimeError: ")?;
-        match self {
-            RuntimeError::InvalidMathOp(left, op, right) => {
-                write!(
-                    f,
-                    "Invalid math operation \"{} {} {}\" {}",
-                    left,
-                    op.with_lexeme(|lex| lex.to_string()),
-                    right,
-                    op.coordinate
-                )
-            }
-            RuntimeError::InvalidComparisonOp(left, op, right) => {
-                write!(
-                    f,
-                    "Invalid comparison operation \"{} {} {}\" {}",
-                    left,
-                    op.with_lexeme(|lex| lex.to_string()),
-                    right,
-                    op.coordinate
-                )
-            }
-            RuntimeError::InvalidUnaryOp(op, right) => {
-                write!(
-                    f,
-                    "Invalid unary operation \"{} {}\" {}",
-                    op.with_lexeme(|lex| lex.to_string()),
-                    right,
-                    op.coordinate
-                )
-            }
-
-            RuntimeError::UndefinedVariable(name) => {
-                write!(
-                    f,
-                    "Undefined variable \"{}\" {}",
-                    name.with_lexeme(|lex| lex.to_string()),
-                    name.coordinate
-                )
-            }
-
-            RuntimeError::InvalidLogicalOp(op) => {
-                write!(
-                    f,
-                    "Invalid logical operation \"{}\" {}",
-                    op.with_lexeme(|lex| lex.to_string()),
-                    op.coordinate
-                )
-            }
-
-            RuntimeError::Uncallable(obj, tok) => {
-                write!(
-                    f,
-                    "Invalid call expression trying to call literal value -> {} {}",
-                    obj, tok.coordinate
-                )
-            }
-
-            RuntimeError::Native(s) => {
-                write!(f, "{}", s)
-            }
-        }
     }
 }

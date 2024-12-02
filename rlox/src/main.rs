@@ -1,18 +1,21 @@
 //use lox::cli::{Cli, CliError};
-use rlox::interpreter::Interpreter;
-use rlox::parser::{ParseError, Parser};
-use rlox::scanner::Scanner;
+use rlox::interpreter::visitor::LoxVisitor;
+use rlox::language::errors::ParseError;
+use rlox::language::parser::Parser;
+use rlox::language::scanner::Scanner;
 
 fn main() {
     let input = r#"
-        // prints from 0 -> 9
-        var name = "John";
+        var a = "global";
+        {
+          fun showA() {
+            print a;
+          }
 
-        fun sayHiTo(age) {
-            print "Hi " + name + " I heard your age is " + age;
+          showA();
+          var a = "block";
+          showA();
         }
-
-        sayHiTo("30");
     "#;
     let tokens = Scanner::new(input).scan_tokens();
 
@@ -28,7 +31,7 @@ fn main() {
         return;
     }
 
-    let result = Interpreter::new().interpret(&ast.unwrap());
+    let result = LoxVisitor::new().interpret(&ast.unwrap());
 
     if result.is_err() {
         // println!("Error interpreting ast");

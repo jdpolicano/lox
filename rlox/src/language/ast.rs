@@ -1,4 +1,4 @@
-use crate::token::Token;
+use crate::language::token::Token;
 
 macro_rules! define_ast {
     ($enum_name:ident $visitor_name:ident {
@@ -72,6 +72,13 @@ define_ast! {
             operator: Token,
             right: Box<Expr>,
         },
+
+        // to support anonymous functions, we create a function node,
+        // so that functions can produce a value in place of creating a side effect.
+        Function visit_function {
+            params: Vec<Token>,
+            body: Vec<Stmt>
+        },
     }
 }
 
@@ -115,6 +122,11 @@ define_ast! {
             name: Token,
             params: Vec<Token>,
             body: Vec<Stmt>
+        },
+
+        Return visit_return {
+            keyword: Token,
+            value: Option<Expr>,
         }
     }
 }
