@@ -203,10 +203,6 @@ impl Parser {
     fn break_statement(&mut self) -> Result<Stmt, ParseError> {
         let keyword = self.take_token()?.clone();
         if !self.is_in_loop {
-            // return Err(ParseError::UnexpectedToken(
-            //     "\"break\" can only occur inside a loop",
-            //     keyword,
-            // ));
             return Err(ParseError::UnexpectedToken {
                 msg: "\"break\" can only occur inside a loop",
                 token_lexeme: keyword.lexeme_or_empty(),

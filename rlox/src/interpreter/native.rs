@@ -5,6 +5,7 @@ use crate::interpreter::visitor::LoxVisitor;
 use crate::language::ast::Stmt;
 use crate::language::token::Token;
 use std::cell::RefCell;
+use std::fs::read_to_string;
 use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 

@@ -20,7 +20,7 @@ fn main() {
         }
 
         var start = clock();
-        print fib(100000);
+        print fib(1000000);
         print clock() - start;
     "#;
     let tokens = Scanner::new(input).scan_tokens();
